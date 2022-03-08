@@ -348,6 +348,39 @@ func (a *AT) SMSCommand(cmd string, sms string, options ...CommandOption) (info 
 	}
 }
 
+// UDPCommand issues an UDP send command to the modem, and returns the result.
+//
+// An UDP send command is issued in two steps; first the command line:
+//
+//   AT<command><CR>
+//
+// which the modem responds to with a ">" prompt, after which the UDP packet
+// content can be sent to the modem:
+//
+//   <sms><Ctrl-Z>
+//
+// The modem then completes the command and returns "SEND OK" if success.
+//
+// The format of the packet is a text message.
+func (a *AT) UDPCommand(cmd string, data string, options ...CommandOption) (info []string, err error) {
+	cfg := commandConfig{timeout: a.cmdTimeout}
+	for _, option := range options {
+		option.applyCommandOption(&cfg)
+	}
+	done := make(chan response)
+	cmdf := func() {
+		info, err := a.processUDPReq(cmd, data, cfg.timeout)
+		done <- response{info: info, err: err}
+	}
+	select {
+	case <-a.closed:
+		return nil, ErrClosed
+	case a.cmdCh <- cmdf:
+		rsp := <-done
+		return rsp.info, rsp.err
+	}
+}
+
 // cmdLoop is responsible for the interface to the modem.
 //
 // It serialises the issuing of commands and awaits the responses.
@@ -515,6 +548,52 @@ func (a *AT) processSmsReq(cmd string, sms string, timeout time.Duration) (info 
 	}
 }
 
+// perform a UDP send request  - issuing the command, awaiting the prompt, sending
+// the data and awaiting the response.
+func (a *AT) processUDPReq(cmd string, data string, timeout time.Duration) (info []string, err error) {
+	a.waitEscGuard()
+	err = a.writeSMSCommand(cmd)
+	if err != nil {
+		return
+	}
+	cmdID := parseCmdID(cmd)
+	var expChan <-chan time.Time
+	if timeout >= 0 {
+		expiry := time.NewTimer(timeout)
+		expChan = expiry.C
+		defer expiry.Stop()
+	}
+	for {
+		select {
+		case <-expChan:
+			// cancel outstanding UDP send request
+			a.escape()
+			err = ErrDeadlineExceeded
+			return
+		case line, ok := <-a.cLines:
+			if !ok {
+				err = ErrClosed
+				return
+			}
+			if line == "" {
+				continue
+			}
+			lt := parseRxLine(line, cmdID)
+			i, done, perr := a.processUDPRxLine(lt, line, data)
+			if i != nil {
+				info = append(info, *i)
+			}
+			if perr != nil {
+				err = perr
+				return
+			}
+			if done {
+				return
+			}
+		}
+	}
+}
+
 // processRxLine parses a line received from the modem and determines how it
 // adds to the response for the current command.
 //
@@ -561,6 +640,29 @@ func (a *AT) processSmsRxLine(lt rxl, line string, sms string) (info *string, do
 		}
 	default:
 		return a.processRxLine(lt, line)
+	}
+	return
+}
+
+// processUDPRxLine parses a line received from the modem and determines how it
+// adds to the response for the UDP send command.
+//
+// The return values are:
+//  - a line of info to be added to the response (optional)
+//  - a flag indicating if the command is complete.
+//  - an error detected while processing the command.
+func (a *AT) processUDPRxLine(lt rxl, line string, data string) (info *string, done bool, err error) {
+	switch lt {
+	case rxlSMSPrompt:
+		if err = a.writeSMS(data); err != nil {
+			// escape data sending
+			a.escape()
+		}
+	case rxlSendOk:
+		info = &line
+		done = true
+	default:
+		err = ErrConfirmationNotReceived
 	}
 	return
 }
@@ -658,6 +760,10 @@ var (
 	// ErrIndicationExists indicates there is already a indication registered
 	// for a prefix.
 	ErrIndicationExists = errors.New("indication exists")
+
+	// ErrConfirmationNotReceived indicates that the confirmation for the issued
+	// command hs not been received.
+	ErrConfirmationNotReceived = errors.New("confirmation not received")
 )
 
 // newError parses a line and creates an error corresponding to the content.
@@ -696,6 +802,7 @@ const (
 	rxlStatusError
 	rxlAsync
 	rxlSMSPrompt
+	rxlSendOk
 	rxlConnect
 	rxlConnectError
 )
@@ -774,6 +881,8 @@ func parseRxLine(line string, cmdID string) rxl {
 		return rxlInfo
 	case line == ">":
 		return rxlSMSPrompt
+	case strings.HasSuffix(line, "SEND OK"):
+		return rxlSendOk
 	case strings.HasPrefix(line, "AT"+cmdID):
 		return rxlEchoCmdLine
 	case len(cmdID) == 0 || cmdID[0] != 'D':
