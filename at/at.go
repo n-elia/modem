@@ -278,7 +278,7 @@ func (a *AT) RawCommand(cmd string, options ...CommandOption) ([]string, error) 
 	}
 	done := make(chan response)
 	cmdf := func() {
-		info, err := a.processReq(cmd, cfg.timeout)
+		info, err := a.processRawReq(cmd, cfg.timeout)
 		done <- response{info: info, err: err}
 	}
 	select {
