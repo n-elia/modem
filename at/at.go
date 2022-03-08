@@ -263,54 +263,31 @@ func (a *AT) Command(cmd string, options ...CommandOption) ([]string, error) {
 	}
 }
 
-// Escape issues an escape sequence to the modem.
+// RawCommand issues the command to the modem without 'AT' prefix and returns the result.
 //
-// It does not wait for any response, but it does inhibit subsequent commands
-// until the escTime has elapsed.
+// The command should include the AT prefix, while <CR><LF> suffix is
+// automatically added.
 //
-// The escape sequence is "\x1b\r\n".  Additional characters may be added to
-// the sequence using the b parameter.
-func (a *AT) Escape(b ...byte) {
-	done := make(chan struct{})
+// The return value includes the info (the lines returned by the modem between
+// the command and the status line), or an error if the command did not
+// complete successfully.
+func (a *AT) RawCommand(cmd string, options ...CommandOption) ([]string, error) {
+	cfg := commandConfig{timeout: a.cmdTimeout}
+	for _, option := range options {
+		option.applyCommandOption(&cfg)
+	}
+	done := make(chan response)
 	cmdf := func() {
-		a.escape(b...)
-		close(done)
+		info, err := a.processReq(cmd, cfg.timeout)
+		done <- response{info: info, err: err}
 	}
 	select {
 	case <-a.closed:
+		return nil, ErrClosed
 	case a.cmdCh <- cmdf:
-		<-done
+		rsp := <-done
+		return rsp.info, rsp.err
 	}
-}
-
-// Init initialises the modem by escaping any outstanding SMS commands and
-// resetting the modem to factory defaults.
-//
-// The Init is intended to be called after creation and before any other
-// commands are issued in order to get the modem into a known state.  It can
-// also be used subsequently to return the modem to a known state.
-//
-// The default init commands can be overridden by the options parameter.
-func (a *AT) Init(options ...InitOption) error {
-	// escape any outstanding SMS operations then CR to flush the command
-	// buffer
-	a.Escape([]byte("\r\n")...)
-
-	cfg := initConfig{cmds: a.initCmds}
-	for _, option := range options {
-		option.applyInitOption(&cfg)
-	}
-	for _, cmd := range cfg.cmds {
-		_, err := a.Command(cmd, cfg.cmdOpts...)
-		switch err {
-		case nil:
-		case ErrDeadlineExceeded:
-			return err
-		default:
-			return fmt.Errorf("AT%s returned error: %w", cmd, err)
-		}
-	}
-	return nil
 }
 
 // SMSCommand issues an SMS command to the modem, and returns the result.
@@ -379,6 +356,56 @@ func (a *AT) UDPCommand(cmd string, data string, options ...CommandOption) (info
 		rsp := <-done
 		return rsp.info, rsp.err
 	}
+}
+
+// Escape issues an escape sequence to the modem.
+//
+// It does not wait for any response, but it does inhibit subsequent commands
+// until the escTime has elapsed.
+//
+// The escape sequence is "\x1b\r\n".  Additional characters may be added to
+// the sequence using the b parameter.
+func (a *AT) Escape(b ...byte) {
+	done := make(chan struct{})
+	cmdf := func() {
+		a.escape(b...)
+		close(done)
+	}
+	select {
+	case <-a.closed:
+	case a.cmdCh <- cmdf:
+		<-done
+	}
+}
+
+// Init initialises the modem by escaping any outstanding SMS commands and
+// resetting the modem to factory defaults.
+//
+// The Init is intended to be called after creation and before any other
+// commands are issued in order to get the modem into a known state.  It can
+// also be used subsequently to return the modem to a known state.
+//
+// The default init commands can be overridden by the options parameter.
+func (a *AT) Init(options ...InitOption) error {
+	// escape any outstanding SMS operations then CR to flush the command
+	// buffer
+	a.Escape([]byte("\r\n")...)
+
+	cfg := initConfig{cmds: a.initCmds}
+	for _, option := range options {
+		option.applyInitOption(&cfg)
+	}
+	for _, cmd := range cfg.cmds {
+		_, err := a.Command(cmd, cfg.cmdOpts...)
+		switch err {
+		case nil:
+		case ErrDeadlineExceeded:
+			return err
+		default:
+			return fmt.Errorf("AT%s returned error: %w", cmd, err)
+		}
+	}
+	return nil
 }
 
 // cmdLoop is responsible for the interface to the modem.
@@ -463,6 +490,49 @@ func (a *AT) escape(b ...byte) {
 func (a *AT) processReq(cmd string, timeout time.Duration) (info []string, err error) {
 	a.waitEscGuard()
 	err = a.writeCommand(cmd)
+	if err != nil {
+		return
+	}
+
+	cmdID := parseCmdID(cmd)
+	var expChan <-chan time.Time
+	if timeout >= 0 {
+		expiry := time.NewTimer(timeout)
+		expChan = expiry.C
+		defer expiry.Stop()
+	}
+	for {
+		select {
+		case <-expChan:
+			err = ErrDeadlineExceeded
+			return
+		case line, ok := <-a.cLines:
+			if !ok {
+				return nil, ErrClosed
+			}
+			if line == "" {
+				continue
+			}
+			lt := parseRxLine(line, cmdID)
+			i, done, perr := a.processRxLine(lt, line)
+			if i != nil {
+				info = append(info, *i)
+			}
+			if perr != nil {
+				err = perr
+				return
+			}
+			if done {
+				return
+			}
+		}
+	}
+}
+
+// perform a request for raw command  - issuing the command and awaiting the response.
+func (a *AT) processRawReq(cmd string, timeout time.Duration) (info []string, err error) {
+	a.waitEscGuard()
+	err = a.writeRawCommand(cmd)
 	if err != nil {
 		return
 	}
@@ -694,6 +764,15 @@ Loop:
 // This should only be called from within the cmdLoop.
 func (a *AT) writeCommand(cmd string) error {
 	cmdLine := "AT" + cmd + "\r\n"
+	_, err := a.modem.Write([]byte(cmdLine))
+	return err
+}
+
+// writeRawCommand writes a one line command to the modem.
+//
+// This should only be called from within the cmdLoop.
+func (a *AT) writeRawCommand(cmd string) error {
+	cmdLine := cmd + "\r\n"
 	_, err := a.modem.Write([]byte(cmdLine))
 	return err
 }
