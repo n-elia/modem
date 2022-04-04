@@ -1,3 +1,20 @@
+This repository is a fork of [`warthog618/modem`](https://github.com/warthog618/modem).
+
+The branch `module/simcom-7020e` adds useful functions for Simcom 7020e module:
+
+- Send UDP packets:
+    ```go
+    func (a *AT) UDPCommand(cmd string, data string, options ...CommandOption) (info []string, err error)
+    ```
+- Issue a command without 'AT' prefix:
+	```go
+	func (a *AT) RawCommand(cmd string, options ...CommandOption) ([]string, error)
+	```
+
+The original `modem` readme follows.
+
+---
+
 # modem
 
 A low level Go driver for AT modems.
@@ -85,7 +102,7 @@ info = []string{
     "Manufacturer: huawei",
     "Model: E173",
     "Revision: 21.017.09.00.314",
-    "IMEI: 1234567",
+	"IMEI: 1234567",
     "+GCAP: +CGSM,+DS,+ES",
     }
 ```
@@ -94,10 +111,10 @@ Refer to the [modeminfo](cmd/modeminfo/modeminfo.go) for an example of how to cr
 
 For more information, refer to package documentation, tests and example commands.
 
-Package | Documentation | Tests | Example code
-------- | ------------- | ----- | ------------
-[at](at) | [![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/warthog618/modem/at) | [at_test](at/at_test.go) | [modeminfo](cmd/modeminfo/modeminfo.go)
-[gsm](gsm) | [![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/warthog618/modem/gsm) | [gsm_test](gsm/gsm_test.go) | [sendsms](cmd/sendsms/sendsms.go), [waitsms](cmd/waitsms/waitsms.go)
-[info](info) | [![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/warthog618/modem/info) | [info_test](info/info_test.go) | [phonebook](cmd/phonebook/phonebook.go)
-[serial](serial) | [![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/warthog618/modem/serial) | [serial_test](serial/serial_test.go) | [modeminfo](cmd/modeminfo/modeminfo.go), [sendsms](cmd/sendsms/sendsms.go), [waitsms](cmd/waitsms/waitsms.go)
-[trace](trace) | [![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/warthog618/modem/trace) | [trace_test](trace/trace_test.go) | [sendsms](cmd/sendsms/sendsms.go), [waitsms](cmd/waitsms/waitsms.go)
+| Package          | Documentation                                                                                                                                                                | Tests                                | Example code                                                                                                  |
+|------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------|---------------------------------------------------------------------------------------------------------------|
+| [at](at)         | [![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/warthog618/modem/at)     | [at_test](at/at_test.go)             | [modeminfo](cmd/modeminfo/modeminfo.go)                                                                       |
+| [gsm](gsm)       | [![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/warthog618/modem/gsm)    | [gsm_test](gsm/gsm_test.go)          | [sendsms](cmd/sendsms/sendsms.go), [waitsms](cmd/waitsms/waitsms.go)                                          |
+| [info](info)     | [![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/warthog618/modem/info)   | [info_test](info/info_test.go)       | [phonebook](cmd/phonebook/phonebook.go)                                                                       |
+| [serial](serial) | [![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/warthog618/modem/serial) | [serial_test](serial/serial_test.go) | [modeminfo](cmd/modeminfo/modeminfo.go), [sendsms](cmd/sendsms/sendsms.go), [waitsms](cmd/waitsms/waitsms.go) |
+| [trace](trace)   | [![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/warthog618/modem/trace)  | [trace_test](trace/trace_test.go)    | [sendsms](cmd/sendsms/sendsms.go), [waitsms](cmd/waitsms/waitsms.go)                                          |
